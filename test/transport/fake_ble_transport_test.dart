@@ -55,9 +55,7 @@ void main() {
           ],
         );
 
-        final statesFuture = transport.connectionState
-            .take(4)
-            .toList();
+        final statesFuture = transport.connectionState.take(4).toList();
 
         final connectFuture = transport.connect(
           'sensor-1',
