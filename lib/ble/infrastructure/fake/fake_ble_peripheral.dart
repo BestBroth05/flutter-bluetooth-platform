@@ -32,11 +32,28 @@ final class FakeBlePeripheral {
       characteristics: const <GattCharacteristic>[
         GattCharacteristic(
           uuid: DemoProtocolConstants.demoCommandCharacteristicUuid,
-          properties: GattCharacteristicProperties(canWrite: true),
+          properties: GattCharacteristicProperties(
+            canWrite: true,
+            canWriteWithoutResponse: true,
+          ),
         ),
         GattCharacteristic(
           uuid: DemoProtocolConstants.demoTelemetryCharacteristicUuid,
-          properties: GattCharacteristicProperties(canNotify: true),
+          properties: GattCharacteristicProperties(
+            canNotify: true,
+            canRead: true,
+          ),
+        ),
+      ],
+    ),
+    // Standard Battery Service (0x180F) with Battery Level (0x2A19) for simulator demos.
+    GattService(
+      uuid: '0000180f-0000-1000-8000-00805f9b34fb',
+      characteristics: <GattCharacteristic>[
+        GattCharacteristic(
+          uuid: '00002a19-0000-1000-8000-00805f9b34fb',
+          properties: const GattCharacteristicProperties(canRead: true),
+          lastValue: <int>[batteryLevel.percent],
         ),
       ],
     ),
