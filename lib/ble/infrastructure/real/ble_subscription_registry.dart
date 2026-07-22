@@ -15,10 +15,7 @@ final class BleSubscriptionRegistry {
   bool contains(CharacteristicRef ref) =>
       _subscriptions.containsKey(keyFor(ref));
 
-  void add(
-    CharacteristicRef ref,
-    StreamSubscription<List<int>> subscription,
-  ) {
+  void add(CharacteristicRef ref, StreamSubscription<List<int>> subscription) {
     final key = keyFor(ref);
     unawaited(_subscriptions[key]?.cancel());
     _subscriptions[key] = subscription;
