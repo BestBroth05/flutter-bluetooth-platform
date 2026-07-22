@@ -1,150 +1,145 @@
 # Flutter Bluetooth Platform
 
 A personal portfolio project that demonstrates a reusable Flutter Bluetooth Low
-Energy (BLE) architecture. The focus is clean module boundaries, testable
-transport abstractions, packet reassembly, connection policies, and local
-paired-device persistence.
+Energy (BLE) architecture with **simulator mode** and **real BLE central mode**.
 
 This repository is greenfield portfolio code. It is not affiliated with any
 commercial or medical product.
 
 > **Important:** The demonstration GATT UUIDs and packet framing format used in
-> this project are invented for portfolio demos only. They are unrelated to any
+> simulator demos are invented for portfolio use only. They are unrelated to any
 > commercial or medical Bluetooth device.
 
 ## Current status
 
-**Phase 1 — Simulator mode**
+**Phase 2 — Real BLE central support + simulator**
 
-The app runs entirely against a fake BLE transport. You can exercise discovery,
-connection sessions, GATT discovery, telemetry streaming, command writes,
-timeouts, retries, reconnection, and local pairing without hardware.
+- Simulator mode remains the default for tests and demos.
+- Real BLE mode uses `flutter_blue_plus` on Android and iOS.
+- Real mode is unavailable (typed unsupported state) on web/desktop in this phase.
 
-Real BLE hardware integration is **not** implemented in this phase.
+## Selected BLE package
+
+| Field | Value |
+|-------|-------|
+| Package | `flutter_blue_plus` |
+| Version | **2.3.10** |
+| License | FlutterBluePlus License v1.5 |
+| Personal / educational use | Free (Section 2 / `License.nonprofit`) |
+| Commercial / for-profit use | Requires paid commercial license |
+
+Full evaluation: [docs/BLE_PACKAGE_LICENSE_EVALUATION.md](docs/BLE_PACKAGE_LICENSE_EVALUATION.md)
+
+Comparable OSI-licensed alternatives (not used in this phase): `universal_ble`,
+`flutter_reactive_ble` (both BSD-3-Clause).
 
 ## Main capabilities
 
-- BLE scanning simulation with RSSI
-- Connection and disconnection lifecycle
-- Simulated GATT service and characteristic discovery
-- Characteristic writes (demo commands)
-- Notification / telemetry streaming
-- Generic packet fragmentation and reassembly
-- Connection timeouts
-- Retry with exponential backoff
-- Reconnection with cancellation
-- Local paired-device persistence (`shared_preferences`)
-- Typed BLE failures and `Result` handling
-- Minimal simulator dashboard UI (`flutter_bloc` + GetIt)
+- Transport mode selection: Simulator / Real BLE
+- Bluetooth adapter state monitoring
+- Runtime permission handling
+- BLE scanning with timeout, cancellation, dedupe, RSSI, optional filters
+- Connect / disconnect with timeout
+- GATT service and characteristic discovery
+- Characteristic read / write (with and without response when supported)
+- Notification / indication subscriptions
+- Raw notification log (hex + printable text when valid)
+- Optional demo `PKT` framing (explicit opt-in for real devices)
+- Retry and reconnection policies
+- Local paired-device persistence
+- Typed `BleFailure` mapping
 
 ## Architecture overview
-
-The project follows a layered structure with replaceable infrastructure:
-
-| Layer | Responsibility |
-|-------|----------------|
-| Presentation | Simulator dashboard Cubit/UI |
-| Application | Session coordination (scan, connect, frame, persist) |
-| Domain | Models, ports, policies, framing contracts |
-| Infrastructure | Fake BLE transport, local storage |
-| Demo protocol | Invented framing constants and framer |
-
-### Dependency direction
 
 ```text
 presentation → application → domain
 infrastructure → domain
 application → domain interfaces
-demo_protocol → generic framing interfaces only
 ```
 
-The domain layer does not import Flutter, `flutter_blue_plus`,
-`shared_preferences`, or UI libraries. Transport, framing, and storage sit
-behind interfaces so implementations can be swapped later.
+Domain code does not import Flutter plugins. Plugin types stay in
+`lib/ble/infrastructure/real/`.
 
-## Generic demo packet format
+### Dependency direction
 
-Invented demonstration framing only:
+| Layer | Responsibility |
+|-------|----------------|
+| Presentation | Dashboard Cubit/UI |
+| Application | Session coordinator, transport factory |
+| Domain | Models, ports, policies, framing contracts |
+| Infrastructure | Fake transport, FBP transport, permissions, persistence |
+
+## Simulator versus real mode
+
+| Mode | Transport | Default in tests | Hardware |
+|------|-----------|------------------|----------|
+| Simulator | `FakeBleTransport` | Yes | None |
+| Real BLE | `FlutterBluePlusBleTransport` | No | Physical Android/iOS device |
+
+Switching modes stops scans, disconnects active sessions when needed, and
+disposes prior streams.
+
+## Real scan workflow
+
+1. Request Bluetooth permissions.
+2. Confirm adapter is on.
+3. Start scan (optional name / min-RSSI / service filters).
+4. Select a device and connect.
+5. Discover GATT services/characteristics.
+6. Read, write, or subscribe based on characteristic properties.
+
+Notes:
+
+- Demo UUIDs are **not** applied as default scan filters in real mode.
+- Some phones may hide unnamed devices or expose randomized identifiers.
+
+## Connection lifecycle
 
 ```text
-[ 'P', 'K', 'T' ][ uint16 big-endian payload length ][ payload bytes ]
+disconnected → connecting → connected → (discover services) → ready
+ready → disconnecting → disconnected
 ```
 
-| Field | Details |
-|-------|---------|
-| Magic | ASCII `PKT` (`0x50 0x4B 0x54`) |
-| Length | Big-endian `uint16` |
-| Max payload | 1024 bytes |
-| Demo service UUID | `12345678-1234-5678-1234-56789abcdef0` |
-| Demo command characteristic | `12345678-1234-5678-1234-56789abcdef1` |
-| Demo telemetry characteristic | `12345678-1234-5678-1234-56789abcdef2` |
+Also handled: permission failure, adapter off, timeout, discovery failure,
+unexpected disconnect, user disconnect, reconnect in progress / cancelled.
 
-These values exist solely so reassembly, writes, and notifications can be
-demonstrated in simulator mode.
+Intentional user disconnect does **not** auto-reconnect. Unexpected disconnect
+may trigger reconnection through the existing policy abstraction.
 
-## Simulator devices and scenarios
+## GATT explorer
 
-Default simulated sensors:
+Connected devices expose an expandable GATT tree with property flags. Unsupported
+operations are blocked in the UI and return typed failures.
 
-| Device ID | Name | Behavior |
-|-----------|------|----------|
-| `sim-sensor-alpha` | Demo Sensor Alpha | Reliable connect |
-| `sim-sensor-beta` | Demo Sensor Beta | Reliable connect |
-| `sim-sensor-flaky` | Demo Sensor Flaky | Simulated connection failure |
+## Raw notifications versus optional framed packets
 
-Supported demo scenarios:
+1. Raw characteristic bytes are always shown when subscribed.
+2. Demo `PKT` framing is optional and must be explicitly enabled.
+3. Malformed framed data must not crash the raw notification stream.
 
-- Device discovery / scanning states
-- Connect and disconnect
-- Service discovery simulation
-- Telemetry streaming (including fragmented frames)
-- Command writes with acknowledgement frames
-- Connection failure
-- Connection timeout
-- Retry behavior
-- Reconnection and cancel-reconnect
-- Persisted paired-device information
-
-## Project structure
+Invented demo framing:
 
 ```text
-lib/
-├── main.dart
-├── app.dart
-├── di/
-├── core/
-│   ├── error/
-│   └── utils/
-├── ble/
-│   ├── domain/
-│   │   ├── models/
-│   │   ├── repositories/
-│   │   ├── framing/
-│   │   └── policies/
-│   ├── application/
-│   ├── infrastructure/
-│   │   ├── fake/
-│   │   └── persistence/
-│   └── presentation/
-├── features/
-│   └── dashboard/
-└── demo_protocol/
-test/
-├── framing/
-├── policies/
-├── transport/
-├── persistence/
-└── fakes/                  # reserved for shared test helpers
-docs/
-└── ARCHITECTURE.md
+[ 'P', 'K', 'T' ][ uint16 BE length ][ payload ]
 ```
+
+## Android permission model
+
+Uses the upstream “No Location” model for modern Android:
+
+- API 31+: `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT`
+- API ≤ 30: legacy Bluetooth permissions + location (`maxSdkVersion` limited)
+- `minSdk` ≥ 21
+
+This app does not derive physical location from BLE scans.
+
+## iOS privacy configuration
+
+- `NSBluetoothAlwaysUsageDescription` explains generic sensor discovery/connect use.
+- Background Bluetooth modes are **not** enabled in this phase.
+- Apps cannot programmatically turn Bluetooth on; the user controls Bluetooth power.
 
 ## Setup and run
-
-Requirements:
-
-- Flutter stable (project SDK: `^3.11.5`)
-- Dart included with Flutter
 
 ```bash
 git clone https://github.com/BestBroth05/flutter-bluetooth-platform.git
@@ -153,49 +148,64 @@ flutter pub get
 flutter run
 ```
 
-The app launches in simulator mode and discovers demo sensors without a
-physical Bluetooth peripheral.
-
 ## Test and analysis
 
 ```bash
 dart format --set-exit-if-changed .
 flutter analyze
 flutter test
+flutter build apk --debug
 ```
+
+Optional iOS compile check (not BLE validation):
+
+```bash
+flutter build ios --simulator
+```
+
+## Manual testing limitations
+
+Automated tests never depend on physical Bluetooth hardware.
+
+Real BLE behavior requires a physical Android and/or iOS device and an authorized
+nearby peripheral or development board. The iOS Simulator cannot reliably validate
+BLE scanning.
+
+If no authorized physical peripheral is available, treat real hardware behavior as
+**unverified**.
+
+### Responsible testing
+
+- Do not send arbitrary writes to unknown nearby devices.
+- Do not repeatedly connect to devices you do not own or have permission to test.
+- Prefer your own development boards or explicitly authorized peripherals.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---------|--------------|
+| Permission missing | Runtime permission denied/permanently denied |
+| Adapter off | Bluetooth disabled in system settings |
+| Real mode unsupported | Running on web/desktop |
+| No devices found | Device not advertising, OS filtering, or permissions |
+| Unauthorized adapter state (iOS) | Bluetooth permission not granted |
+| Write/notify disabled | Characteristic properties do not allow the operation |
 
 ## Current limitations
 
-- No real-device BLE adapter yet
-- No production-polished multi-screen UI
-- No networking, authentication, or cloud sync
-- Permissions and platform BLE settings flows are deferred to the real-adapter phase
-- Feature folders beyond the dashboard shell are reserved for later extraction
-
-## Roadmap: real BLE adapter
-
-Planned next steps:
-
-1. Add a `flutter_blue_plus` infrastructure adapter implementing `BleTransport`
-2. Keep the fake transport for tests, CI, and demos
-3. Add runtime permission handling for Android and iOS
-4. Expand the dashboard into scanner / session / telemetry feature UIs
-5. Preserve the same domain contracts so the application layer stays stable
-
-## IP and privacy guardrails
-
-- This is independently written portfolio code
-- No client branding, proprietary UUIDs, opcodes, or device protocols
-- No medical or assay domain terminology
-- No secrets, API endpoints, Firebase configuration, or credentials
-- Local persistence stores only generic paired-device fields (`id`, `name`,
-  `lastConnectedAt`)
+- Real BLE claimed only for Android/iOS
+- No background BLE modes
+- No polished multi-screen navigation beyond the Phase 2 dashboard
+- No cloud sync
+- Commercial reuse of `flutter_blue_plus` requires a paid license
 
 ## License
 
 This project is released under the [MIT License](LICENSE).
 
 Copyright (c) 2026 Brayan Olivares
+
+`flutter_blue_plus` remains under the FlutterBluePlus License (see evaluation doc).
 
 ## Package identity
 
@@ -205,4 +215,4 @@ Copyright (c) 2026 Brayan Olivares
 | Flutter package name | `bluetooth_platform` |
 | Application identifier | `dev.brayanolivares.bluetooth_platform` |
 
-For deeper module notes, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+See also [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
