@@ -1,29 +1,67 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../ble/domain/models/ble_adapter_state.dart';
 import '../../../ble/domain/models/ble_connection_state.dart';
+import '../../../ble/domain/models/ble_transport_mode.dart';
+import '../../../ble/domain/models/ble_write_type.dart';
+import '../../../ble/domain/permissions/ble_permission_status.dart';
+import '../../../core/codec/byte_codecs.dart';
 import 'simulator_cubit.dart';
 
-/// Minimal portfolio shell for exercising the BLE simulator.
+/// Phase 2 dashboard for simulator and real BLE central workflows.
 class SimulatorDashboardPage extends StatelessWidget {
   const SimulatorDashboardPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('BLE Platform Simulator')),
+      appBar: AppBar(title: const Text('Flutter Bluetooth Platform')),
       body: BlocBuilder<SimulatorCubit, SimulatorState>(
         builder: (context, state) {
           final cubit = context.read<SimulatorCubit>();
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Text(
-                'Session: ${state.connectionState.name}',
-                style: Theme.of(context).textTheme.titleMedium,
+              _sectionTitle(context, 'Transport mode'),
+              SegmentedButton<BleTransportMode>(
+                segments: [
+                  const ButtonSegment(
+                    value: BleTransportMode.simulator,
+                    label: Text('Simulator'),
+                  ),
+                  ButtonSegment(
+                    value: BleTransportMode.real,
+                    label: Text(
+                      state.realBleSupported
+                          ? 'Real BLE'
+                          : 'Real (unsupported)',
+                    ),
+                    enabled: state.realBleSupported,
+                  ),
+                ],
+                selected: {state.transportMode},
+                onSelectionChanged: state.busy
+                    ? null
+                    : (selection) => cubit.switchTransportMode(selection.first),
               ),
-              if (state.selectedDeviceId != null)
-                Text('Connected device: ${state.selectedDeviceId}'),
+              const SizedBox(height: 16),
+              _sectionTitle(context, 'Bluetooth readiness'),
+              Text('Adapter: ${state.adapterState.name}'),
+              Text('Permission: ${state.permissionStatus.name}'),
+              Text('Session: ${state.connectionState.name}'),
+              if (state.selectedDeviceId != null) ...[
+                Text(
+                  'Device: ${state.selectedDeviceName ?? state.selectedDeviceId}',
+                ),
+                Text('Paired: ${state.isPairedSelected}'),
+                if (state.currentRssi != null)
+                  Text('RSSI: ${state.currentRssi} dBm'),
+                if (state.lastActivityAt != null)
+                  Text(
+                    'Last activity: ${state.lastActivityAt!.toIso8601String()}',
+                  ),
+              ],
               if (state.lastError != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -31,7 +69,47 @@ class SimulatorDashboardPage extends StatelessWidget {
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ],
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: state.busy ? null : cubit.requestPermissions,
+                    child: const Text('Request permissions'),
+                  ),
+                  OutlinedButton(
+                    onPressed: state.busy ? null : cubit.refreshPermissions,
+                    child: const Text('Refresh permission status'),
+                  ),
+                  if (state.adapterState == BleAdapterState.off)
+                    const Chip(label: Text('Bluetooth is off')),
+                  if (state.permissionStatus == BlePermissionStatus.denied ||
+                      state.permissionStatus ==
+                          BlePermissionStatus.permanentlyDenied)
+                    const Chip(label: Text('Permission missing')),
+                ],
+              ),
               const SizedBox(height: 16),
+              _sectionTitle(context, 'Scan filters'),
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Name contains',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: cubit.updateNameFilter,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Minimum RSSI (dBm)',
+                  border: OutlineInputBorder(),
+                  hintText: 'e.g. -80',
+                ),
+                keyboardType: TextInputType.number,
+                onChanged: cubit.updateMinRssiFilter,
+              ),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -50,9 +128,9 @@ class SimulatorDashboardPage extends StatelessWidget {
                     onPressed:
                         state.connectionState == BleConnectionState.connected &&
                             !state.busy
-                        ? cubit.sendDemoCommand
+                        ? cubit.refreshRssi
                         : null,
-                    child: const Text('Write command'),
+                    child: const Text('Read RSSI'),
                   ),
                   OutlinedButton(
                     onPressed:
@@ -71,21 +149,22 @@ class SimulatorDashboardPage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 24),
-              Text(
-                'Discovered devices',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              if (state.devices.isEmpty)
-                const Text('No devices yet. Start a scan to discover sensors.')
+              _sectionTitle(context, 'Discovered devices'),
+              if (state.isScanning && state.devices.isEmpty)
+                const Text('Scanning for nearby devices…')
+              else if (state.devices.isEmpty)
+                const Text(
+                  'No devices found. Start a scan to discover sensors.',
+                )
               else
                 ...state.devices.map(
                   (device) => Card(
                     child: ListTile(
                       title: Text(device.name),
                       subtitle: Text(
-                        '${device.id} · RSSI ${device.signalStrength.rssiDbm} dBm',
+                        '${device.id}\nRSSI ${device.signalStrength.rssiDbm} dBm',
                       ),
+                      isThreeLine: true,
                       trailing: FilledButton(
                         onPressed: state.busy
                             ? null
@@ -96,13 +175,10 @@ class SimulatorDashboardPage extends StatelessWidget {
                   ),
                 ),
               const SizedBox(height: 24),
-              Text(
-                'GATT services',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
+              _sectionTitle(context, 'GATT explorer'),
+              Text('Services: ${state.services.length}'),
               if (state.services.isEmpty)
-                const Text('Connect to a sensor to discover services.')
+                const Text('Connect to a device to inspect GATT services.')
               else
                 ...state.services.map(
                   (service) => Card(
@@ -112,10 +188,22 @@ class SimulatorDashboardPage extends StatelessWidget {
                           .map(
                             (characteristic) => ListTile(
                               dense: true,
+                              selected:
+                                  state
+                                      .selectedCharacteristic
+                                      ?.characteristicUuid ==
+                                  characteristic.uuid,
                               title: Text(characteristic.uuid),
                               subtitle: Text(
+                                'read=${characteristic.properties.canRead} '
                                 'write=${characteristic.properties.canWrite} '
-                                'notify=${characteristic.properties.canNotify}',
+                                'writeNoRsp=${characteristic.properties.canWriteWithoutResponse} '
+                                'notify=${characteristic.properties.canNotify} '
+                                'indicate=${characteristic.properties.canIndicate}',
+                              ),
+                              onTap: () => cubit.selectCharacteristic(
+                                service.uuid,
+                                characteristic,
                               ),
                             ),
                           )
@@ -123,27 +211,129 @@ class SimulatorDashboardPage extends StatelessWidget {
                     ),
                   ),
                 ),
+              if (state.selectedCharacteristic != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Selected: ${state.selectedCharacteristic!.characteristicUuid}',
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.tonal(
+                      onPressed: state.busy
+                          ? null
+                          : cubit.readSelectedCharacteristic,
+                      child: const Text('Read'),
+                    ),
+                    FilledButton.tonal(
+                      onPressed: state.busy ? null : cubit.subscribeSelected,
+                      child: const Text('Subscribe'),
+                    ),
+                    OutlinedButton(
+                      onPressed: state.busy ? null : cubit.unsubscribeSelected,
+                      child: const Text('Unsubscribe'),
+                    ),
+                    if (state.transportMode == BleTransportMode.simulator)
+                      OutlinedButton(
+                        onPressed: state.busy ? null : cubit.sendDemoCommand,
+                        child: const Text('Demo write'),
+                      ),
+                  ],
+                ),
+                if (state.lastReadHex != null) ...[
+                  Text('Last read (hex): ${state.lastReadHex}'),
+                  if (state.lastReadText != null)
+                    Text('Last read (text): ${state.lastReadText}'),
+                ],
+                const SizedBox(height: 8),
+                TextFormField(
+                  initialValue: state.commandInput,
+                  decoration: const InputDecoration(
+                    labelText: 'Command payload',
+                    helperText: 'Examples: hex 01 02 03 or text PING',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: cubit.updateCommandInput,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton(
+                      onPressed: state.busy
+                          ? null
+                          : () =>
+                                cubit.writeSelectedCharacteristic(asHex: true),
+                      child: const Text('Write hex'),
+                    ),
+                    FilledButton.tonal(
+                      onPressed: state.busy
+                          ? null
+                          : () =>
+                                cubit.writeSelectedCharacteristic(asHex: false),
+                      child: const Text('Write text'),
+                    ),
+                    OutlinedButton(
+                      onPressed: state.busy
+                          ? null
+                          : () => cubit.writeSelectedCharacteristic(
+                              asHex: true,
+                              writeType: BleWriteType.withoutResponse,
+                            ),
+                      child: const Text('Write without response'),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 24),
-              Text('Telemetry', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              if (state.telemetry.isEmpty)
-                const Text('No telemetry samples yet.')
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Enable demo PKT framing'),
+                subtitle: const Text(
+                  'Off by default. Do not enable for arbitrary real devices.',
+                ),
+                value: state.demoFramingEnabled,
+                onChanged: cubit.setDemoFramingEnabled,
+              ),
+              _sectionTitle(context, 'Raw notifications'),
+              if (state.rawNotifications.isEmpty)
+                const Text('No notification bytes yet.')
               else
-                ...state.telemetry.map(
+                ...state.rawNotifications
+                    .take(12)
+                    .map(
+                      (event) => Text(
+                        '${event.receivedAt.toIso8601String()} · '
+                        '${event.characteristic.characteristicUuid} · '
+                        '${ByteCodecs.toHex(event.bytes)}'
+                        '${ByteCodecs.tryDecodePrintable(event.bytes) == null ? '' : ' · "${ByteCodecs.tryDecodePrintable(event.bytes)}"'}',
+                      ),
+                    ),
+              const SizedBox(height: 16),
+              _sectionTitle(context, 'Framed telemetry (optional)'),
+              if (state.framedTelemetry.isEmpty)
+                const Text(
+                  'No framed samples. Enable demo framing to parse PKT.',
+                )
+              else
+                ...state.framedTelemetry.map(
                   (sample) => Text(
                     '${sample.receivedAt.toIso8601String()} · '
-                    '${sample.payload.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+                    '${ByteCodecs.toHex(sample.payload)}',
                   ),
                 ),
+              const SizedBox(height: 16),
+              _sectionTitle(context, 'Command history (session)'),
+              if (state.commandHistory.isEmpty)
+                const Text('No commands yet.')
+              else
+                ...state.commandHistory.map(Text.new),
               const SizedBox(height: 24),
               Row(
                 children: [
-                  Expanded(
-                    child: Text(
-                      'Paired devices',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
+                  Expanded(child: _sectionTitle(context, 'Paired devices')),
                   TextButton(
                     onPressed: state.pairedDevices.isEmpty
                         ? null
@@ -152,7 +342,6 @@ class SimulatorDashboardPage extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
               if (state.pairedDevices.isEmpty)
                 const Text('No paired devices stored locally.')
               else
@@ -180,6 +369,13 @@ class SimulatorDashboardPage extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+
+  Widget _sectionTitle(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(text, style: Theme.of(context).textTheme.titleMedium),
     );
   }
 }
