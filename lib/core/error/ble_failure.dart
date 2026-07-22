@@ -96,3 +96,26 @@ final class UnexpectedBleFailure extends BleFailure {
     super.message = 'An unexpected Bluetooth error occurred.',
   ]);
 }
+
+final class UnsupportedPlatformFailure extends BleFailure {
+  const UnsupportedPlatformFailure([
+    super.message =
+        'Real Bluetooth Low Energy is not supported on this platform.',
+  ]);
+}
+
+final class AdapterOffFailure extends BleFailure {
+  const AdapterOffFailure([super.message = 'Bluetooth is turned off.']);
+}
+
+final class ReadFailure extends BleFailure {
+  const ReadFailure([
+    super.message = 'Failed to read from the GATT characteristic.',
+  ]);
+}
+
+final class UnsupportedOperationFailure extends BleFailure {
+  const UnsupportedOperationFailure([
+    super.message = 'The requested GATT operation is not supported.',
+  ]);
+}
